@@ -7,6 +7,7 @@
 #include<stdlib.h> //exit(0);
 #include<arpa/inet.h>
 #include<sys/socket.h>
+#include <unistd.h>
  
 #define BUFLEN 512  //Max length of buffer
 #define PORT 8888   //The port on which to listen for incoming data
@@ -25,7 +26,7 @@ int main(void)
     char buf[BUFLEN];
      
     //create a UDP socket
-    if ((s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+    if ((s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) // (IPV4, DATAGRAMA, UDP)
     {
         die("socket");
     }
@@ -33,12 +34,12 @@ int main(void)
     // zero out the structure
     memset((char *) &si_me, 0, sizeof(si_me));
      
-    si_me.sin_family = AF_INET;
-    si_me.sin_port = htons(PORT);
+    si_me.sin_family = AF_INET; //IPV4
+    si_me.sin_port = htons(PORT);  // PORTA
     si_me.sin_addr.s_addr = htonl(INADDR_ANY);
      
     //bind socket to port
-    if( bind(s , (struct sockaddr*)&si_me, sizeof(si_me) ) == -1)
+    if( bind(s , (struct sockaddr*)&si_me, sizeof(si_me) ) == -1) //amarração das configurações do socket
     {
         die("bind");
     }

@@ -7,8 +7,9 @@
 #include<stdlib.h> //exit(0);
 #include<arpa/inet.h>
 #include<sys/socket.h>
+#include <unistd.h>
  
-#define SERVER "127.0.0.1"
+#define SERVER "127.0.0.1" //endereço do servidor
 #define BUFLEN 512  //Max length of buffer
 #define PORT 8888   //The port on which to send data
  
@@ -25,7 +26,7 @@ int main(void)
     char buf[BUFLEN];
     char message[BUFLEN];
  
-    if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+    if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) //(IPV4, DATAGRAMA, UDP)
     {
         die("socket");
     }
@@ -34,7 +35,7 @@ int main(void)
     si_other.sin_family = AF_INET;
     si_other.sin_port = htons(PORT);
      
-    if (inet_aton(SERVER , &si_other.sin_addr) == 0) 
+    if (inet_aton(SERVER , &si_other.sin_addr) == 0) //converte para o formato da rede
     {
         fprintf(stderr, "inet_aton() failed\n");
         exit(1);
