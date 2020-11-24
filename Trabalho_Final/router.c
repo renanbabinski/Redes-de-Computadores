@@ -13,10 +13,10 @@ int geth(){
 	return 0;
 }
 
-int context_menu(){
+int context_menu(char* router){
     int menu;
     system("clear");
-    printf("Eu sou o router numero: \n\n");
+    printf("Eu sou o router numero: %s \n\n", router);
     printf("1) MANDAR MENSAGEM \n");
     printf("2) VER VIZINHOS \n");
     printf("3) VER CONFIGURAÇÕES DESSE ROUTER\n");
@@ -31,11 +31,18 @@ int context_menu(){
 
 
 
-int main(){
+int main(int argc, char *argv[]){
 
     int menu;
 
-while ((menu = context_menu()) != EXIT){
+    if (argc != 2)
+    {
+         printf("\n Usage: %s <router number> \n", argv[0]);
+        return 1;
+    }
+    
+
+while ((menu = context_menu(argv[1])) != EXIT){
 
     switch (menu)
     {
