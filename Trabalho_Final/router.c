@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #define EXIT 0
 
 
@@ -29,17 +30,32 @@ int context_menu(char* router){
 }
 
 
-
-
 int main(int argc, char *argv[]){
 
     int menu;
+    FILE *configs, *enlaces;
+    char linha [50], routern;
+    char *result;
 
     if (argc != 2)
     {
          printf("\n Usage: %s <router number> \n", argv[0]);
         return 1;
     }
+
+    if((configs = fopen("roteador.config", "rt")) == NULL){
+        printf("Problemas na abertura do arquivo de configuração do roteador!\n");
+        return 1;
+    }
+
+    while(!feof(configs)){                      //pega a linha de configuração do roteador correspondente
+            fgets(linha, 50, configs);  
+            if(linha[0] == *argv[1])
+                break;
+        }
+        fseek(configs, 0, SEEK_SET);
+
+
     
 
 while ((menu = context_menu(argv[1])) != EXIT){
@@ -55,9 +71,14 @@ while ((menu = context_menu(argv[1])) != EXIT){
         geth();
         break;
     case 3:
-        printf("Você Escolheu: %d", menu);
+        printf("Ver as configurações do router\n\n");
+
+        printf("Numero do Roteador: %c", linha[0]);
+        printf("Numero da porta: %s", linha[2]);
+        printf("IP: %s", linha[8]);
         geth();
         break;
+        
     default:
         printf("Opção Inválida\n");
         geth();
