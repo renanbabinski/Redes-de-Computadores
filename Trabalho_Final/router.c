@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 #define EXIT 0
 
 FILE *configs, *enlaces;
@@ -68,6 +71,10 @@ int main(int argc, char *argv[]){
     int numero_r;
     int porta_r;
     char ip_r[15];
+
+    //threads
+
+    //pthread_t menuthread;
 
     if (argc != 2)
     {
