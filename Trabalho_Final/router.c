@@ -16,9 +16,7 @@
 #define DESTINO 0
 #define CUSTO 1
 #define NEXT_HOP 2
-//#define SERVER "127.0.0.1" //endereço do servidor
 #define BUFLEN 512  //Max length of buffer
-//#define PORT 8888 // Porta por onde os dados virão
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct{
@@ -27,27 +25,13 @@ typedef struct{
         char ip[15];
     }router_config;
 
-char message[500] = "This \n is \n a \n test \n";
 int init_flag = 1;
 
 FILE *configs, *enlaces;
 
-/*void //die(char *s){
-    perror(s);
-    exit(1);
-}*/
-
-void* receive_data(void* arg){
-    
-}
-
 void* udp_server(void* arg){
     router_config *router_svr;
     router_svr = (router_config*)arg;
-
-    //printf("numero do router: %d", router_svr->numero);
-    //printf("porta do router: %d", router_svr->porta);
-    //printf("ip do router: %s", router_svr->ip);
 
     struct sockaddr_in si_me, si_other;
 
@@ -117,7 +101,6 @@ int geth(){
 
 int context_menu(int router){
     int menu;
-    //pthread_mutex_lock(&lock);
     system("clear");
     printf("Eu sou o router numero: %d \n\n", router);
     printf("1) MANDAR MENSAGEM \n");
@@ -129,7 +112,6 @@ int context_menu(int router){
     printf("\n\n");
     printf("Incoming Messages...\n");
     printf("\n");
-    //pthread_mutex_unlock(&lock);
     scanf("%d", &menu);
     geth();
     return menu;
@@ -185,9 +167,6 @@ int main(int argc, char *argv[]){
     int numero_dest_r;
     int porta_dest_r;
     char ip_dest_r[15];
-
-    
-    
 
     //threads
 
@@ -259,8 +238,6 @@ int main(int argc, char *argv[]){
     fclose(enlaces);
 
     int routing_table[count][3];   // tabela de roteamento    Destino, Custo, Next_hop
-    //int *rt_table;
-    //rt_table = routing_table;
 
     for(k=0; k<count; k++){
         if(numero_r == k+1){                    //Se o destino for o próprio roteador
@@ -281,13 +258,10 @@ int main(int argc, char *argv[]){
 
 
 pthread_create(&udp_srv, NULL, udp_server, router_c);
-//pthread_create(&d_v, NULL, distance_vector, rt_table);
-//pthread_join(udp_srv, NULL);
 
 //////////////// MENU DE PROGRAMA ///////////////////
 
 while ((menu = context_menu(numero_r)) != EXIT){
-    //pthread_mutex_lock(&lock);
     switch (menu)
     {
     case 1:
@@ -406,7 +380,6 @@ while ((menu = context_menu(numero_r)) != EXIT){
         geth();
         break;
     
-    //pthread_mutex_unlock(&lock);
     }
 
 
