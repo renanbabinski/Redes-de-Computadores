@@ -9,9 +9,13 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#define CONTROLE "c"
-#define DADOS "d"
+#define CONTROLE 'c'
+#define DADOS 'd'
 #define EXIT 0
+#define INFINITE 1000
+#define DESTINO 0
+#define CUSTO 1
+#define NEXT_HOP 2
 //#define SERVER "127.0.0.1" //endereço do servidor
 #define BUFLEN 512  //Max length of buffer
 //#define PORT 8888 // Porta por onde os dados virão
@@ -24,7 +28,7 @@ typedef struct{
     }router_config;
 
 char message[500] = "This \n is \n a \n test \n";
-int control = 0;
+int init_flag = 1;
 
 FILE *configs, *enlaces;
 
@@ -84,9 +88,12 @@ void* udp_server(void* arg){
         }
          
         //print details of the client/peer and the data received
-        control = 1;
-        printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-        printf("Data: %s\n" , buf);
+        if(buf[0] == CONTROLE){
+            printf("RECEBIDO PACOTE DE CONTROLE DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+        }else if(buf[0] == DADOS){
+            printf("RECEBIDO PACOTE DE DADOS DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+            printf("Data: %s\n" , &buf[2]);
+        }
          
         //now reply the client with the same data
         if (sendto(s, buf, recv_len, 0, (struct sockaddr*) &si_other, slen) == -1)
@@ -95,10 +102,6 @@ void* udp_server(void* arg){
         }
     }
     close(s);
-
-    
-
-
 
 }
 
@@ -121,6 +124,7 @@ int context_menu(int router){
     printf("2) VER VIZINHOS \n");
     printf("3) VER CONFIGURAÇÕES DESSE ROUTER\n");
     printf("4) VER MATRIZ DE ENLACES\n");
+    printf("5) VER TABELA DE ROTEAMENTO\n");
     printf("0) SAIR DO PROGRAMA\n");
     printf("\n\n");
     printf("Incoming Messages...\n");
@@ -188,7 +192,7 @@ int main(int argc, char *argv[]){
     //threads
 
     pthread_t udp_srv;
-
+    pthread_t d_v;
     
     
 
@@ -217,15 +221,16 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    while(!feof(configs)){                     
+    while(!feof(configs)){                     //Conta a quantidade de destinos possiveis
         fgets(linha, 50, configs);
         count++;
     }
     fseek(configs, 0, SEEK_SET);
     fclose(configs);
     
-    int links[count][count];  //Matriz de enlaces bidirecionais
-    int j,k;
+    
+    int links[count][count];  //Matriz de enlaces bidirecionais preenchida com -1
+    int j,k,i;
     for(j=0; j<count; j++){
         for(k=0; k<count; k++){
             links[j][k] = -1;
@@ -233,11 +238,11 @@ int main(int argc, char *argv[]){
     }
     
     
-    while(!feof(enlaces)){                  
+    while(!feof(enlaces)){                  // Matriz de enlaces bidirecionais atualizada com custo
         fgets(linha, 50, enlaces);  
         
         substring = strtok(linha, " ");
-        for (int i = 0; i < 3; i++)
+        for (i = 0; i < 3; i++)
         {
             if(i == 0)
                 j = atoi(substring);
@@ -253,7 +258,30 @@ int main(int argc, char *argv[]){
     fseek(enlaces, 0, SEEK_SET);
     fclose(enlaces);
 
+    int routing_table[count][3];   // tabela de roteamento    Destino, Custo, Next_hop
+    //int *rt_table;
+    //rt_table = routing_table;
+
+    for(k=0; k<count; k++){
+        if(numero_r == k+1){                    //Se o destino for o próprio roteador
+            routing_table[k][DESTINO] = k+1;
+            routing_table[k][CUSTO] = 0;
+            routing_table[k][NEXT_HOP] = 0;
+        }
+        else if(links[numero_r-1][k] != -1){        //Se o destino for um vizinho
+            routing_table[k][DESTINO] = k+1;
+            routing_table[k][CUSTO] = links[numero_r-1][k];
+            routing_table[k][NEXT_HOP] = 0;
+        }else{                                      //Se o destino não é um vizinho
+            routing_table[k][DESTINO] = k+1;
+            routing_table[k][CUSTO] = INFINITE;
+            routing_table[k][NEXT_HOP] = INFINITE;
+        }
+    }    
+
+
 pthread_create(&udp_srv, NULL, udp_server, router_c);
+//pthread_create(&d_v, NULL, distance_vector, rt_table);
 //pthread_join(udp_srv, NULL);
 
 //////////////// MENU DE PROGRAMA ///////////////////
@@ -288,6 +316,7 @@ while ((menu = context_menu(numero_r)) != EXIT){
         int s, i, slen=sizeof(si_other);
         char buf[BUFLEN];
         char message[BUFLEN];
+        message[0] = 'd';  //Define o tipo de mensagem
 
         if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) //(IPV4, DATAGRAMA, UDP)
         {
@@ -308,7 +337,7 @@ while ((menu = context_menu(numero_r)) != EXIT){
         //{
             printf("Insira a mensagem para enviar ao roteador numero: %d: ", numero_dest_r);
             //gets(message);
-            scanf("%s",message);
+            scanf("%s",&message[2]);
             
             //send the message
             if (sendto(s, message, strlen(message) , 0 , (struct sockaddr *) &si_other, slen)==-1)
@@ -360,6 +389,18 @@ while ((menu = context_menu(numero_r)) != EXIT){
         }
         geth();
         
+    case 5:
+        printf("Ver tabela de roteamento:\n\n");
+
+        for(i=0;i<count;i++){
+            for(k=0;k<3;k++){
+                printf("%d      ", routing_table[i][k]);
+            }
+            printf("\n");
+        }
+
+        geth();
+
     default:
         printf("Opção Inválida\n");
         geth();
