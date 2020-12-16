@@ -9,6 +9,8 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#define CONTROLE "c"
+#define DADOS "d"
 #define EXIT 0
 //#define SERVER "127.0.0.1" //endereço do servidor
 #define BUFLEN 512  //Max length of buffer
