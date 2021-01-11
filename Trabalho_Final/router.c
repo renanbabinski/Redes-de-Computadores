@@ -47,6 +47,12 @@ struct router_config{
         char ip[15];
     }config;
 
+struct distance_v{
+    int destino;
+    int custo;
+    int time_stamp;
+}distance_vector[NUMBER_OF_ROUTERS];
+
 int links[NUMBER_OF_ROUTERS][NUMBER_OF_ROUTERS];  //Matriz de enlaces bidirecionais preenchida com -1 na inicialização
 
 FILE *configs, *enlaces;
@@ -74,6 +80,14 @@ char *  itoa ( int value, char * str )
       j--;
    }
     return str;
+}
+
+void zero_fill_dv(){
+    for(int i=0;i<NUMBER_OF_ROUTERS;i++){
+        distance_vector->destino = 0;
+        distance_vector->custo = 0;
+        distance_vector->time_stamp = 0;
+    }
 }
 
 void get_router_config(int* numero, int* porta, char* ip ){   //pega a linha de configuração do roteador correspondente
@@ -209,11 +223,6 @@ void* distance_vector_sender(void* arg){
 
 
 
-
-
-
-
-
 // THREAD ->>>  UDP RECEIVED MESSAGES
 void* udp_server(void* arg){
     struct sockaddr_in si_me, si_other;
@@ -298,6 +307,7 @@ int context_menu(int router){
     printf("4) VER MATRIZ DE ENLACES\n");
     printf("5) VER TABELA DE ROTEAMENTO\n");
     printf("6) FORÇAR ENVIO VETOR DISTÂNCIA\n");
+    printf("7) VER VETORES DISTANCIA RECEBIDOS\n");
     printf("0) SAIR DO PROGRAMA\n");
     printf("\n\n");
     printf("Incoming Messages...\n");
@@ -368,6 +378,9 @@ int main(int argc, char *argv[]){
     
     
     int j,k,i;
+
+    zero_fill_dv();
+
     for(j=0; j<NUMBER_OF_ROUTERS; j++){
         for(k=0; k<NUMBER_OF_ROUTERS; k++){
             links[j][k] = -1;
@@ -538,6 +551,15 @@ while ((menu = context_menu(config.numero)) != EXIT){
         resend_dv = 1;
         geth();
         break;
+
+    case 7:
+        printf("\nVETORES DISTÂNCIA RECEBIDOS:\n\n");
+        for(i=0;i<NUMBER_OF_ROUTERS;i++){
+            if(distance_vector[i].destino != 0){
+                printf("destino:  %d    custo    %d   timestamp:    %d\n", distance_vector[i].destino, distance_vector[i].custo, distance_vector[i].time_stamp);
+            }
+        }
+        geth();
 
     default:
         printf("Opção Inválida\n");
