@@ -51,7 +51,7 @@ struct distance_v{
     int destino;
     int custo;
     int time_stamp;
-}distance_vector[NUMBER_OF_ROUTERS];
+}distance_vector_received[NUMBER_OF_ROUTERS];
 
 int links[NUMBER_OF_ROUTERS][NUMBER_OF_ROUTERS];  //Matriz de enlaces bidirecionais preenchida com -1 na inicialização
 
@@ -84,9 +84,9 @@ char *  itoa ( int value, char * str )
 
 void zero_fill_dv(){
     for(int i=0;i<NUMBER_OF_ROUTERS;i++){
-        distance_vector->destino = 0;
-        distance_vector->custo = 0;
-        distance_vector->time_stamp = 0;
+        distance_vector_received->destino = 0;
+        distance_vector_received->custo = 0;
+        distance_vector_received->time_stamp = 0;
     }
 }
 
@@ -555,8 +555,8 @@ while ((menu = context_menu(config.numero)) != EXIT){
     case 7:
         printf("\nVETORES DISTÂNCIA RECEBIDOS:\n\n");
         for(i=0;i<NUMBER_OF_ROUTERS;i++){
-            if(distance_vector[i].destino != 0){
-                printf("destino:  %d    custo    %d   timestamp:    %d\n", distance_vector[i].destino, distance_vector[i].custo, distance_vector[i].time_stamp);
+            if(distance_vector_received[i].destino != 0){
+                printf("destino:  %d    custo    %d   timestamp:    %d\n", distance_vector_received[i].destino, distance_vector_received[i].custo, distance_vector_received[i].time_stamp);
             }
         }
         geth();
