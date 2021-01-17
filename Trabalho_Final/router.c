@@ -21,9 +21,9 @@
 #define DESTINO 0
 #define CUSTO 1
 #define NEXT_HOP 2
-#define TIMESTAMP 3
+//#define TIMESTAMP 3
 #define BUFLEN 512  //Max length of buffer
-#define BEACON 10  //Periodo em que o vetor distância será enviado
+#define BEACON 10  //Periodo em que o vetor distância será enviado (SEGUNDOS)
 
 // FLAGS
 
@@ -37,6 +37,7 @@ int time_s = 0;
 
 //////////
 
+// MUTEX PARA ATUALIZAÇÃO DA TABELA DE ROTEAMENTO
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 int routing_table[NUMBER_OF_ROUTERS][3];   // tabela de roteamento    Destino, Custo, Next_hop
@@ -47,13 +48,9 @@ struct router_config{
         char ip[15];
     }config;
 
-struct distance_v{
-    int destino;
-    int custo;
-    int time_stamp;
-}distance_vector_received[NUMBER_OF_ROUTERS];
-
 int links[NUMBER_OF_ROUTERS][NUMBER_OF_ROUTERS];  //Matriz de enlaces bidirecionais preenchida com -1 na inicialização
+
+char *received_dv[NUMBER_OF_ROUTERS];
 
 FILE *configs, *enlaces;
 
@@ -82,13 +79,13 @@ char *  itoa ( int value, char * str )
     return str;
 }
 
-void zero_fill_dv(){
+/*void zero_fill_dv(){
     for(int i=0;i<NUMBER_OF_ROUTERS;i++){
         distance_vector_received->destino = 0;
         distance_vector_received->custo = 0;
         distance_vector_received->time_stamp = 0;
     }
-}
+}*/
 
 void get_router_config(int* numero, int* porta, char* ip ){   //pega a linha de configuração do roteador correspondente
     char linha[50];
@@ -128,21 +125,101 @@ int geth(){
 	return 0;
 }
 
+//THREAD  ->> LINK LOSS
 
+void* link_loss(void* arg){
+    char* temp;
+    char stringtok[BUFLEN];
+    int origem, time_stamp;
+    
+    while(1){
+        sleep(1);
+        for(int i=0; i<NUMBER_OF_ROUTERS; i++){
+            if(received_dv[i] != NULL){
+                strcpy(stringtok, received_dv[i]);
+                temp = strtok(stringtok,",");
+                temp = strtok(NULL, ",");
+                origem = atoi(temp);
+                temp = strtok(NULL, ",");
+                time_stamp = atoi(temp);
+                //printf("\nLINK LOSS ITERATION!");
+                if((time_s - time_stamp) > (3*BEACON)){
+                    //printf("\n########       LINK LOSS DETECTED %d tempo atual: %d  tempo armazenado: %d     ##########",origem, time_s, time_stamp);
+                    pthread_mutex_lock(&lock);
+                    routing_table[origem-1][CUSTO] = INFINITE;
+                    routing_table[origem-1][NEXT_HOP] = INFINITE;
+                    free(received_dv[i]);
+                    received_dv[i] = NULL;
+                    //resend_dv = 1;
+                    pthread_mutex_unlock(&lock);
+                }
+            }
+        }
+
+    }
+
+}
 
 // THREAD ->>>  TIMER
 void* timer(void* arg){
     while(1){
         sleep(1);
         time_s++;
+        // Seta flag para reenviar o vetor distância após tempo definido no macro BEACON
         if((time_s % BEACON) == 0){
-            //printf("\nBEACON SEND  -- time: %d",time_s);
             resend_dv = 1;
-        }else{
-            //printf("\ntime: %d",time_s);
         }
     }
 }
+
+//THREAD  ->>>  DISTANCE VECTOR UPDATE
+
+void* distance_vector_update(void* arg){
+    char *temp;
+    char *buf;
+    buf = (char*) arg;
+    int origem;
+    int custo_enlace;
+    int temp_destino, temp_custo;
+    int custo_alternativo;
+    char buf_received[BUFLEN];
+
+
+    strcpy(buf_received, buf);
+    temp = strtok(&buf[1], ",");
+    printf("\nORIGEM: %s\n", temp);
+    origem = atoi(temp);
+    custo_enlace = links[config.numero-1][origem-1];
+    received_dv[origem-1] = malloc(BUFLEN*sizeof(char));
+    strcpy(received_dv[origem-1], buf_received);
+    printf("\nCUSTO DO ENLACE = %d\n", custo_enlace);
+    temp = strtok(NULL, ",");
+    printf("TIMESTAMP: %s\n\n", temp);
+    temp = strtok(NULL, ",");
+
+    for(int j=0; j<NUMBER_OF_ROUTERS;j++){
+        printf("DESTINO: %s          ", temp);
+        temp_destino = atoi(temp);
+        temp = strtok(NULL, ",");
+        printf("CUSTO: %s\n", temp);
+        temp_custo = atoi(temp);
+        temp = strtok(NULL, ",");
+        custo_alternativo = temp_custo + custo_enlace;
+        if(custo_alternativo < routing_table[temp_destino-1][CUSTO]){
+            pthread_mutex_trylock(&lock);
+            printf("\nLOCKED!\n");
+            routing_table[temp_destino-1][CUSTO] = custo_alternativo;
+            routing_table[temp_destino-1][NEXT_HOP] = origem;
+            resend_dv = 1;
+        }
+    }
+
+    pthread_mutex_unlock(&lock);
+
+    free(buf);
+}
+
+
 
 // THREAD ->>>  DISTANCE VECTOR SENDER
 void* distance_vector_sender(void* arg){
@@ -152,7 +229,6 @@ void* distance_vector_sender(void* arg){
     int s, i, slen=sizeof(si_other);
     char buf[BUFLEN];
     char message[BUFLEN];
-    message[0] = CONTROLE;  //Define o tipo de mensagem
     char test[20] = "teste msg controle";
     char cache[10]={0};
     
@@ -162,6 +238,7 @@ void* distance_vector_sender(void* arg){
         sleep(1);
         if(resend_dv == 1){
             printf("ENCAMINHANDO MENSAGEM DE CONTROLE PERIÓDICA PARA: ");
+            pthread_mutex_lock(&lock);
             for(int k=0; k<NUMBER_OF_ROUTERS; k++){
                 if(links[config.numero-1][k] != -1){
                     printf("%d ", k+1);
@@ -181,6 +258,9 @@ void* distance_vector_sender(void* arg){
                     si_other.sin_port = htons(porta);
 
                     inet_aton(ip , &si_other.sin_addr);
+
+                    memset(message, '\0', BUFLEN);
+                    message[0] = CONTROLE;  //Define o tipo de mensagem
                 
                     //printf("Insira a mensagem para enviar ao roteador numero: %d: ", destino);
                     //gets(message);
@@ -188,6 +268,13 @@ void* distance_vector_sender(void* arg){
                     //setbuf(stdin, NULL);
 
                     //strcpy(&message[1], "teste mensagem de controle");
+                    strcat(message, ",");
+                    sprintf(cache, "%d", config.numero);
+                    strcat(message, cache);
+                    strcat(message, ",");
+                    sprintf(cache, "%d", time_s);
+                    strcat(message, cache);
+                    strcat(message, ",");
                     for(int j=0; j<NUMBER_OF_ROUTERS; j++){
                         sprintf(cache, "%d", routing_table[j][DESTINO]);
                         strcat(message, cache);
@@ -199,6 +286,8 @@ void* distance_vector_sender(void* arg){
 
 
                     sendto(s, message, strlen(message) , 0 , (struct sockaddr *) &si_other, slen);
+
+                    pthread_mutex_unlock(&lock);
 
                     memset(buf,'\0', BUFLEN);
                 
@@ -229,7 +318,8 @@ void* udp_server(void* arg){
 
     int s, i, slen =  sizeof(si_other) , recv_len;
     char buf[BUFLEN];
-    char *temp;
+
+    pthread_t dv_update;
 
     //criando um socket UDP
     if ((s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1){
@@ -266,16 +356,13 @@ void* udp_server(void* arg){
          
         //print details of the client/peer and the data received
         if(buf[0] == CONTROLE){
+            char *dv;
+            dv = malloc(BUFLEN * sizeof(char));
             printf("\nRECEBIDO PACOTE DE CONTROLE DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
             printf("Data: %s\n" , &buf[1]);
             printf("\nVETOR DISTÂNCIA RECEBIDO!\n");
-            temp = strtok(&buf[1], ",");
-            for(int j=0; j<NUMBER_OF_ROUTERS;j++){
-                printf("DESTINO: %s          ", temp);
-                temp = strtok(NULL, ",");
-                printf("CUSTO: %s\n", temp);
-                temp = strtok(NULL, ",");
-            }
+            strcpy(dv, buf);
+            pthread_create(&dv_update, NULL, distance_vector_update, dv);
         }else if(buf[0] == DADOS){
             printf("\nRECEBIDO PACOTE DE DADOS DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
             //setbuf(stdin,NULL);
@@ -291,10 +378,6 @@ void* udp_server(void* arg){
     close(s);
 
 }
-
-
-
-
 
 
 int context_menu(int router){
@@ -343,6 +426,7 @@ int main(int argc, char *argv[]){
     pthread_t udp_srv;
     pthread_t d_v;
     pthread_t t_timer;
+    pthread_t link_l;
     
     
 
@@ -379,7 +463,7 @@ int main(int argc, char *argv[]){
     
     int j,k,i;
 
-    zero_fill_dv();
+    //zero_fill_dv();
 
     for(j=0; j<NUMBER_OF_ROUTERS; j++){
         for(k=0; k<NUMBER_OF_ROUTERS; k++){
@@ -426,9 +510,10 @@ int main(int argc, char *argv[]){
         }
     }    
 
-//pthread_create(&t_timer, NULL, timer, NULL);
+pthread_create(&t_timer, NULL, timer, NULL);
 pthread_create(&udp_srv, NULL, udp_server, NULL);
 pthread_create(&d_v, NULL, distance_vector_sender, NULL);
+pthread_create(&link_l, NULL, link_loss, NULL);
 
 //////////////// MENU DE PROGRAMA ///////////////////
 
@@ -555,9 +640,7 @@ while ((menu = context_menu(config.numero)) != EXIT){
     case 7:
         printf("\nVETORES DISTÂNCIA RECEBIDOS:\n\n");
         for(i=0;i<NUMBER_OF_ROUTERS;i++){
-            if(distance_vector_received[i].destino != 0){
-                printf("destino:  %d    custo    %d   timestamp:    %d\n", distance_vector_received[i].destino, distance_vector_received[i].custo, distance_vector_received[i].time_stamp);
-            }
+            printf("\nDISTANCE VECTOR RECEIVED OF %d: %s",i+1, received_dv[i]);
         }
         geth();
 
