@@ -1,6 +1,8 @@
 //Universidade Federal da Fronteira Sul - UFFS
 //Estudante: Renan Luiz Babinski
 //Disciplina: Redes de Computadores
+//Professor: MARCO AURÉLIO SPOHN
+//Trabalho: SIMULAÇÃO DO PROTOCOLO DE ROTEAMENTO RIP COM ALGORITMO DE BELLMAN-FORD DISTRIBUÍDO
 
 
 // LIBRARY
@@ -13,79 +15,52 @@
 #include <unistd.h>
 
 //  MACROS
-#define NUMBER_OF_ROUTERS 6
-#define CONTROLE 'c'
-#define DADOS 'd'
-#define EXIT 0
-#define INFINITE 100
-#define DESTINO 0
-#define CUSTO 1
-#define NEXT_HOP 2
-//#define TIMESTAMP 3
-#define BUFLEN 512  //Max length of buffer
-#define BEACON 10  //Periodo em que o vetor distância será enviado (SEGUNDOS)
+
+#define NUMBER_OF_ROUTERS 6     //NÚMERO DE ROTEADORES DA TOPOLOGIA
+#define CONTROLE 'c'            //TIPO DE MENSAGEM (CABEÇALHO)
+#define DADOS 'd'               //TIPO DE MENSAGEM (CABEÇALHO)
+#define EXIT 0                  //MENU EXIT
+#define INFINITE 100            //DEFINE QUE VALOR SERÁ CONDIDERADO COMO INFINITO
+#define DESTINO 0               //ACESSO TABELA DE ROTEAMENTO
+#define CUSTO 1                 //ACESSO TABELA DE ROTEAMENTO
+#define NEXT_HOP 2              //ACESSO TABELA DE ROTEAMENTO
+#define BUFLEN 512              //Max length of buffer
+#define BEACON 10               //Periodo em que o vetor distância será enviado (SEGUNDOS)
+
+//  DEBUG   ->>>   1 PARA _ON_      0 PARA _OFF_
+
+#define THREAD_UDP_SERVER 1     //INFORMAÇÕES PARA DEBUG DA THREAD QUE RECEBE OS PACOTES DE DADOS "d" e CONTROLE "c" 
+#define THREAD_DV_UPDATE  1     //INFORMAÇÕES PARA DEBUG DA THREAD QUE ATUALIZA OS VETORES DISTÂNCIA, IMPRIME OS VETORES RECEBIDOS DOS VIZINHOS
+#define ENVIO_BEACON      1     //ATIVA OU DESATIVA O ENVIO DO VETOR DISTÂNCIA PERIÓDICO
+#define THREAD_TIMER      1     //ATIVA OU DESATIVA O TIMER(THREAD) DO ROTEADOR (SE O TIMER ESTIVER OFF O BEACON NÃO SERÁ ENVIADO!)
+#define MSG_ROTEAMENTO    1     //EXIBE NA TELA OS PACOTES QUE ESTÃO SENDO ROTEADOS
+#define THREAD_DV_SENDER  1     //MOSTRA PARA ONDE OS VETORES DISTÂNCIA ESTÃO SENDO ENCAMINHADOS
 
 // FLAGS
 
-int resend_dv = 0;    //indica quando a thread dv_sender deverá enviar o vetor distância
+int resend_dv = 0;              //indica quando a thread dv_sender deverá enviar o vetor distância
 
 // TIMER
 
-int time_s = 0;
-
-
-
-//////////
+int time_s = 0;                 //VÁRIAVEL DE TEMPO GLOBAL
 
 // MUTEX PARA ATUALIZAÇÃO DA TABELA DE ROTEAMENTO
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
-int routing_table[NUMBER_OF_ROUTERS][3];   // tabela de roteamento    Destino, Custo, Next_hop
+int routing_table[NUMBER_OF_ROUTERS][3];   // tabela de roteamento  ->>  Destino, Custo, Next_hop
 
-struct router_config{
+struct router_config{           //STRUCT INFORMAÇÕES DO ROTEADOR
         int numero;
         int porta;
         char ip[15];
     }config;
 
-int links[NUMBER_OF_ROUTERS][NUMBER_OF_ROUTERS];  //Matriz de enlaces bidirecionais preenchida com -1 na inicialização
+int links[NUMBER_OF_ROUTERS][NUMBER_OF_ROUTERS];  //Matriz de enlaces bidirecionais preenchida com -1 na inicialização, SOMENTE A LINHA DO ROTEADOR CORRESPONDENTE É ACESSADA
 
-char *received_dv[NUMBER_OF_ROUTERS];
+char *received_dv[NUMBER_OF_ROUTERS];             //VETOR DE PONTEIROS PARA OS VETORES DISTÂNCIA RECEBIDOS DOS VIZINHOS
 
-FILE *configs, *enlaces;
+FILE *configs, *enlaces;                          //ARQUIVOS DE CONFIGURAÇÃO DA REDE --> LINKS, CUSTOS, E DESTINOS(IP,PORTA)
 
-char *  itoa ( int value, char * str )
-{
-    char temp;
-    int i =0;
-    while (value > 0) {
-        int digito = value % 10;
-
-        str[i] = digito + '0';
-        value /= 10;
-        i++;
-
-    }
-   i = 0;
-   int j = strlen(str) - 1;
-
-   while (i < j) {
-      temp = str[i];
-      str[i] = str[j];
-      str[j] = temp;
-      i++;
-      j--;
-   }
-    return str;
-}
-
-/*void zero_fill_dv(){
-    for(int i=0;i<NUMBER_OF_ROUTERS;i++){
-        distance_vector_received->destino = 0;
-        distance_vector_received->custo = 0;
-        distance_vector_received->time_stamp = 0;
-    }
-}*/
 
 void get_router_config(int* numero, int* porta, char* ip ){   //pega a linha de configuração do roteador correspondente
     char linha[50];
@@ -104,8 +79,6 @@ void get_router_config(int* numero, int* porta, char* ip ){   //pega a linha de 
     fseek(configs, 0, SEEK_SET);
     
 
-
-
     substring = strtok(linha, " ");                // quebra a linha de configurações em tokens e atribui a variaveis
     for (int i = 0; i < 3; i++)
     {
@@ -119,14 +92,82 @@ void get_router_config(int* numero, int* porta, char* ip ){   //pega a linha de 
     fclose(configs);
 }
 
-int geth(){
+int geth(){                                        //PRESSIONE PARA CONTINUAR (PAUSE)
 	char s;
 	scanf("%c",&s);
 	return 0;
 }
 
-//THREAD  ->> LINK LOSS
 
+//#############           THREADS       #######################  
+
+// THREAD  ->> SEND DATA
+void* send_data(void* arg){
+    
+    char *buf;
+    buf = (char*) arg;
+    char *temp;
+    char buf_cache[BUFLEN];
+
+    int destino, porta, origem;
+    char ip[15];
+    struct sockaddr_in si_other;
+    int s, i, slen=sizeof(si_other);
+
+    strcpy(buf_cache, buf);
+    
+    temp = strtok(&buf_cache[1], ",");
+    
+    origem = atoi(temp);
+    
+    temp = strtok(NULL, ",");
+    
+    destino = atoi(temp);
+    
+    temp = strtok(NULL, ",");
+   
+   
+    // SE O NEXT_HOP FOR DIFERENTE DE 0 QUER DIZER QUE O PACOTE AINDA NÃO CHEGOU NO DESTINO CORRETO
+    if(MSG_ROTEAMENTO == 1){
+        printf("\nNEXT HOP:  %d   CUSTO: %d\n",routing_table[destino][NEXT_HOP], routing_table[destino-1][CUSTO]);
+    }
+    if(routing_table[destino-1][NEXT_HOP] != 0){
+        if(MSG_ROTEAMENTO == 1){
+            printf("\nPACOTE DE DADOS DE ORIGEM %d E DESTINO %d SENDO ROTEADO...\n", origem, destino);
+        }
+        destino = routing_table[destino-1][NEXT_HOP];
+
+        get_router_config(&destino, &porta, ip);   //Pega as informações do roteador de destino
+
+        s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);  
+
+        memset((char *) &si_other, 0, sizeof(si_other));
+        si_other.sin_family = AF_INET;
+        si_other.sin_port = htons(porta);
+
+        inet_aton(ip , &si_other.sin_addr);
+
+        sendto(s, buf, strlen(buf) , 0 , (struct sockaddr *) &si_other, slen);
+
+        memset(buf,'\0', BUFLEN);
+    
+        //recvfrom(s, buf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen);
+
+        //puts(buf);
+    
+        close(s);
+    }else{
+        if(MSG_ROTEAMENTO == 1){
+            printf("\nPACOTE DE DADOS CHEGOU AO DESTINO!\n");
+        }
+            printf("MENSAGEM: %s", temp);
+        
+    }
+}
+
+
+
+//THREAD  ->> LINK LOSS
 void* link_loss(void* arg){
     char* temp;
     char stringtok[BUFLEN];
@@ -142,15 +183,21 @@ void* link_loss(void* arg){
                 origem = atoi(temp);
                 temp = strtok(NULL, ",");
                 time_stamp = atoi(temp);
-                //printf("\nLINK LOSS ITERATION!");
+                printf("\nLINK LOSS ITERATION!");
                 if((time_s - time_stamp) > (3*BEACON)){
-                    //printf("\n########       LINK LOSS DETECTED %d tempo atual: %d  tempo armazenado: %d     ##########",origem, time_s, time_stamp);
+                    printf("\n########       LINK LOSS DETECTED %d tempo atual: %d  tempo armazenado: %d     ##########",origem, time_s, time_stamp);
                     pthread_mutex_lock(&lock);
-                    routing_table[origem-1][CUSTO] = INFINITE;
-                    routing_table[origem-1][NEXT_HOP] = INFINITE;
+                    for(int j=0;j<NUMBER_OF_ROUTERS;j++){
+                        if(routing_table[j][NEXT_HOP] == origem){
+                            routing_table[j][CUSTO] = INFINITE;
+                            routing_table[j][NEXT_HOP] = INFINITE;
+                        }
+                    }
+                    //routing_table[origem-1][CUSTO] = INFINITE;
+                    //routing_table[origem-1][NEXT_HOP] = INFINITE;
                     free(received_dv[i]);
                     received_dv[i] = NULL;
-                    //resend_dv = 1;
+                    resend_dv = 1;
                     pthread_mutex_unlock(&lock);
                 }
             }
@@ -167,7 +214,8 @@ void* timer(void* arg){
         time_s++;
         // Seta flag para reenviar o vetor distância após tempo definido no macro BEACON
         if((time_s % BEACON) == 0){
-            resend_dv = 1;
+            if(ENVIO_BEACON == 1)
+                resend_dv = 1;
         }
     }
 }
@@ -187,27 +235,36 @@ void* distance_vector_update(void* arg){
 
     strcpy(buf_received, buf);
     temp = strtok(&buf[1], ",");
-    printf("\nORIGEM: %s\n", temp);
+    if(THREAD_DV_UPDATE == 1){
+        printf("\nORIGEM: %s\n", temp);
+    }
     origem = atoi(temp);
     custo_enlace = links[config.numero-1][origem-1];
     received_dv[origem-1] = malloc(BUFLEN*sizeof(char));
     strcpy(received_dv[origem-1], buf_received);
-    printf("\nCUSTO DO ENLACE = %d\n", custo_enlace);
+    if(THREAD_DV_UPDATE == 1){
+        printf("\nCUSTO DO ENLACE = %d\n", custo_enlace);
+    }
     temp = strtok(NULL, ",");
-    printf("TIMESTAMP: %s\n\n", temp);
+    if(THREAD_DV_UPDATE == 1){
+        printf("TIMESTAMP: %s\n\n", temp);
+    }
     temp = strtok(NULL, ",");
 
     for(int j=0; j<NUMBER_OF_ROUTERS;j++){
-        printf("DESTINO: %s          ", temp);
+        if(THREAD_DV_UPDATE == 1){
+            printf("DESTINO: %s          ", temp);
+        }
         temp_destino = atoi(temp);
         temp = strtok(NULL, ",");
-        printf("CUSTO: %s\n", temp);
+        if(THREAD_DV_UPDATE == 1){
+            printf("CUSTO: %s\n", temp);
+        }
         temp_custo = atoi(temp);
         temp = strtok(NULL, ",");
         custo_alternativo = temp_custo + custo_enlace;
         if(custo_alternativo < routing_table[temp_destino-1][CUSTO]){
             pthread_mutex_trylock(&lock);
-            printf("\nLOCKED!\n");
             routing_table[temp_destino-1][CUSTO] = custo_alternativo;
             routing_table[temp_destino-1][NEXT_HOP] = origem;
             resend_dv = 1;
@@ -229,7 +286,6 @@ void* distance_vector_sender(void* arg){
     int s, i, slen=sizeof(si_other);
     char buf[BUFLEN];
     char message[BUFLEN];
-    char test[20] = "teste msg controle";
     char cache[10]={0};
     
 
@@ -237,11 +293,15 @@ void* distance_vector_sender(void* arg){
     while(1){
         sleep(1);
         if(resend_dv == 1){
-            printf("ENCAMINHANDO MENSAGEM DE CONTROLE PERIÓDICA PARA: ");
+            if(THREAD_DV_SENDER == 1){
+                printf("ENCAMINHANDO MENSAGEM DE CONTROLE PERIÓDICA PARA: ");
+            }
             pthread_mutex_lock(&lock);
             for(int k=0; k<NUMBER_OF_ROUTERS; k++){
                 if(links[config.numero-1][k] != -1){
-                    printf("%d ", k+1);
+                    if(THREAD_DV_SENDER == 1){
+                        printf("%d ", k+1);
+                    }
                     destino = k+1;
                     //printf("\n\n\n RESEND CHAMADA! \n\n");
 
@@ -261,11 +321,6 @@ void* distance_vector_sender(void* arg){
 
                     memset(message, '\0', BUFLEN);
                     message[0] = CONTROLE;  //Define o tipo de mensagem
-                
-                    //printf("Insira a mensagem para enviar ao roteador numero: %d: ", destino);
-                    //gets(message);
-                    //scanf("teste msg controle",&message[2]);
-                    //setbuf(stdin, NULL);
 
                     //strcpy(&message[1], "teste mensagem de controle");
                     strcat(message, ",");
@@ -301,15 +356,7 @@ void* distance_vector_sender(void* arg){
         }
         resend_dv = 0;
     }
-
-
-
-
-
 }
-
-
-
 
 
 // THREAD ->>>  UDP RECEIVED MESSAGES
@@ -320,6 +367,7 @@ void* udp_server(void* arg){
     char buf[BUFLEN];
 
     pthread_t dv_update;
+    pthread_t msg_send;
 
     //criando um socket UDP
     if ((s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1){
@@ -342,7 +390,8 @@ void* udp_server(void* arg){
     //permaneça escutando
     while(1)
     {
-        printf("Waiting for data...\n");
+        if(THREAD_UDP_SERVER == 1)
+            printf("Waiting for data...\n");
         fflush(stdout);
         //receive a reply and print it
         //clear the buffer by filling null, it might have previously received data
@@ -358,15 +407,30 @@ void* udp_server(void* arg){
         if(buf[0] == CONTROLE){
             char *dv;
             dv = malloc(BUFLEN * sizeof(char));
-            printf("\nRECEBIDO PACOTE DE CONTROLE DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-            printf("Data: %s\n" , &buf[1]);
-            printf("\nVETOR DISTÂNCIA RECEBIDO!\n");
+            if(dv == NULL){
+                printf("\nERRO NA ALOCAÇÃO DE MEMÓRIA!\n");
+                exit(EXIT_FAILURE);
+            }
+            if(THREAD_UDP_SERVER == 1){
+                printf("\nRECEBIDO PACOTE DE CONTROLE DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+                printf("Data: %s\n" , &buf[1]);
+                printf("\nVETOR DISTÂNCIA RECEBIDO!\n");
+            }
             strcpy(dv, buf);
             pthread_create(&dv_update, NULL, distance_vector_update, dv);
         }else if(buf[0] == DADOS){
-            printf("\nRECEBIDO PACOTE DE DADOS DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-            //setbuf(stdin,NULL);
-            printf("Data: %s\n" , &buf[1]);
+            if(THREAD_UDP_SERVER == 1){
+                printf("\nRECEBIDO PACOTE DE DADOS DE %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+                printf("Data: %s\n" , buf);
+            }
+            char *msg;
+            msg = malloc(BUFLEN * sizeof(char));
+            if(msg == NULL){
+                printf("\nERRO NA ALOCAÇÃO DE MEMÓRIA!\n");
+                exit(EXIT_FAILURE);
+            }
+            strcpy(msg, buf);
+            pthread_create(&msg_send, NULL, send_data, msg);
         }
          
         //now reply the client with the same data
@@ -410,11 +474,6 @@ int main(int argc, char *argv[]){
     char linha [50];
     char* substring;
 
-    //Configurações do router
-    //int numero_r;
-    //int porta_r;
-    //char ip_r[15];
-
     //Configurações do Roteador de destino
 
     int numero_dest_r;
@@ -450,15 +509,6 @@ int main(int argc, char *argv[]){
         printf("Problemas na abertura do arquivo de configuração do roteador!\n");
         return 1;
     }
-
-    /*while(!feof(configs)){                     //Conta a quantidade de destinos possiveis
-        fgets(linha, 50, configs);
-        NUMBER_OF_ROUTERS++;
-    }
-    fseek(configs, 0, SEEK_SET);
-    fclose(configs); */
-    //^^^^^^  INSERIDO NUMERO DE DESTINOS MANUALMENTE NA INICIALIZAÇÃO
-    
     
     
     int j,k,i;
@@ -510,10 +560,12 @@ int main(int argc, char *argv[]){
         }
     }    
 
-pthread_create(&t_timer, NULL, timer, NULL);
+if(THREAD_TIMER == 1){
+    pthread_create(&t_timer, NULL, timer, NULL);
+}
 pthread_create(&udp_srv, NULL, udp_server, NULL);
 pthread_create(&d_v, NULL, distance_vector_sender, NULL);
-pthread_create(&link_l, NULL, link_loss, NULL);
+//pthread_create(&link_l, NULL, link_loss, NULL);
 
 //////////////// MENU DE PROGRAMA ///////////////////
 
@@ -523,31 +575,40 @@ while ((menu = context_menu(config.numero)) != EXIT){
     case 1:
         printf("Mandar mensagem\n");
 
-        printf("Informe para qual dos vizinhos abaixo você quer mandar a mensagem:\n\n");
+        printf("Informe para qual dos roteadores abaixo você quer mandar a mensagem:\n\n");
 
         for(k=0; k<NUMBER_OF_ROUTERS; k++){
-            if(links[config.numero-1][k] != -1){
-                printf("Vizinho numero: %d\nCusto: %d\n\n", k+1, links[config.numero-1][k]);
-            }
+            if(k+1 != config.numero)
+                printf("Roteador numero: %d\n", k+1);
         }
         while(1){
             scanf("%d", &selection);
             setbuf(stdin, NULL);
-            if(links[config.numero-1][selection-1] != -1){
+            if(selection <= NUMBER_OF_ROUTERS && selection > 0 && selection != config.numero){
                 break;
             }else{
-                printf("O roteador não é um vizinho!");
+                printf("\nNão é possivel mandar mensagem para o mesmo roteador ou roteador inexistente!");
             }
         }
 
-        numero_dest_r = selection;
+        numero_dest_r = routing_table[selection-1][NEXT_HOP];
         get_router_config(&numero_dest_r, &porta_dest_r, ip_dest_r);   //Pega as informações do roteador de destino
 
         struct sockaddr_in si_other;
         int s, i, slen=sizeof(si_other);
         char buf[BUFLEN];
+        char cache[10]={0};
+        char text[BUFLEN];
         char message[BUFLEN];
+        memset(message, '\0', BUFLEN);
         message[0] = DADOS;  //Define o tipo de mensagem
+        strcat(message, ",");
+        sprintf(cache, "%d", config.numero);
+        strcat(message, cache);
+        strcat(message, ",");
+        sprintf(cache, "%d", selection);
+        strcat(message, cache);
+        strcat(message, ",");
 
         if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) //(IPV4, DATAGRAMA, UDP)
         {
@@ -566,9 +627,11 @@ while ((menu = context_menu(config.numero)) != EXIT){
 
         //while(1)
         //{
-            printf("Insira a mensagem para enviar ao roteador numero: %d: ", numero_dest_r);
-            fgets(&message[1], 400, stdin);
+            printf("Insira a mensagem para enviar ao roteador numero: %d: ", selection);
+            fgets(text, 400, stdin);
             
+            strcat(message, text);
+
             //send the message
             if (sendto(s, message, strlen(message) , 0 , (struct sockaddr *) &si_other, slen)==-1)
             {
@@ -651,11 +714,7 @@ while ((menu = context_menu(config.numero)) != EXIT){
     
     }
 
-
-
-
 }
-
 
 return 0;
 }
